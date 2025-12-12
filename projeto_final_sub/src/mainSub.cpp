@@ -11,14 +11,14 @@
 #define pinEnviar 34
 #define pinLed 23
 
-const String numEsp = "2";
+const String numEsp = "1";
 
 const unsigned long tempoEsperaConexao = 10000;
 const unsigned long tempoEsperaReconexao = 5000;
 
 const char *mqtt_server = "broker.hivemq.com";
 const int   mqtt_port   = 1883;
-const char *mqtt_client_id = "senai134_esp2_sub_match_game";
+const char *mqtt_client_id = "senai134_esp1_sub_match_game";
 const char *mqtt_topic_sub = "main_match_game_pub";
 const char *mqtt_topic_pub = "main_match_game_sub";
 
@@ -165,17 +165,22 @@ void retornoMqtt(char *topic, byte *payload, unsigned int length)
 
   if (erro) Serial.println("erro ao ler json");
 
-  if (strcmp(doc["fim"], "0") == 0) {
-    iniciar = true;
-    iniciarAnterior = false;
-    tempoIniciar = millis();
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("VAMOS NESSA!");
-  }
-  if (strcmp(doc["fim"], "1") == 0) {
-    iniciar = false;
-    conectado();
+  const char *fim = doc["fim"];
+
+  if (fim != NULL) {
+
+    if (strcmp(fim, "0") == 0) {
+      iniciar = true;
+      iniciarAnterior = false;
+      tempoIniciar = millis();
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("VAMOS NESSA!");
+    }
+    if (strcmp(fim, "1") == 0) {
+      iniciar = false;
+      conectado();
+    }
   }
 }
 

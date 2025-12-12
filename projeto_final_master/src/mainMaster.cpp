@@ -176,14 +176,6 @@ void loop() {
         // salva o tempo em que a resposta foi acertada
         tempoResposta = millis();
 
-        if (jogadores[i].cor.equals(vencedorRecebido)) {
-          mostrarVencedor();
-          vencedor = true;
-          respondido = true;
-          gerado = true;
-          acertou = false;
-        }
-
         break; // para sair assim que alguem acertar a respota
       }
     }
@@ -201,18 +193,28 @@ void loop() {
     }
   }
 
-    if (vencedor && millis() - tempoResposta >= 6000) {
-      gerado = true;
+  for (int i = 0; i < 2; i++) {
+    if (jogadores[i].cor.equals(vencedorRecebido)) {
+      mostrarVencedor();
+      vencedor = true;
       respondido = true;
-      iniciar = true;
-      vencedor = false;
-      jogadores[0].iniciar = false;
-      jogadores[1].iniciar = false;
-      jogadores[0].pontos = 0;
-      jogadores[1].pontos = 0;
-      telaInicial();
-      enviarFim();
+      gerado = true;
+      acertou = false;
     }
+  }
+
+  if (vencedor && millis() - tempoResposta >= 6000) {
+    gerado = true;
+    respondido = true;
+    iniciar = true;
+    vencedor = false;
+    jogadores[0].iniciar = false;
+    jogadores[1].iniciar = false;
+    jogadores[0].pontos = 0;
+    jogadores[1].pontos = 0;
+    telaInicial();
+    enviarFim();
+  }
 
   enviarAnterior = enviar;
 }
@@ -282,8 +284,11 @@ void retornoMqtt(char *topic, byte *payload, unsigned int length) {
     }
   }
 
-  if (strcasecmp(venc, "") != 0) {
-    vencedorRecebido = String(venc);
+  if (venc != NULL) {
+
+    if (strcasecmp(venc, "") != 0) {
+      vencedorRecebido = String(venc);
+    }
   }
 }
 
