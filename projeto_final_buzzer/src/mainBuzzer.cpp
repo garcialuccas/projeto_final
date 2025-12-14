@@ -4,9 +4,8 @@
 #include <PubSubClient.h>
 #include <Wire.h>
 #include "Adafruit_VL53L0X.h"
-#include "internet.h" // Certifique-se que este arquivo existe e tem as credenciais
+#include "internet.h"
 
-// --- Configurações de Hardware ---
 #define PINO_BUZZER 12
 
 // Pinos de Controle de Velocidade (ENA/ENB)
@@ -22,37 +21,32 @@
 #define LED_R 13
 #define LED_B 5
 
-// --- Configurações MQTT ---
 const char *mqtt_server = "broker.hivemq.com";
 const int   mqtt_port   = 1883;
 const char *mqtt_client_id = "senai134_esp2_buzzer_match_game_OMNICODE"; // ID Único
 const char *mqtt_topic_sub = "main_match_game_pub";
 const char *mqtt_topic_pub = "main_match_game_sub";
 
-// --- Objetos Globais ---
 WiFiClient espClient;
 PubSubClient client(espClient);
 Adafruit_VL53L0X lox = Adafruit_VL53L0X();
 
-// --- Variáveis de Estado ---
-enum EstadoJogo {
-    AGUARDANDO,
-    CORRIDA,
-    RETORNO,
-    VITORIA_DETECTADA
-};
-
-EstadoJogo estadoAtual = AGUARDANDO;
 String vencedorNome = "";
+bool iniciar = false;
+bool vencedor = true;
+bool andarAzul = false;
+bool andarVermelho = false;
+unsigned long tempoAzul = 0;
+unsigned long tempoVermelho = 0;
+unsigned long tempoVoltar = 0;
 
 int pontosAzul = 0;
 int velocidadeAzul = 0;
 int pontosVermelho = 0;
 int velocidadeVermelho = 0;
 
-// --- Configuração PWM ---
-const int FREQ_PWM = 5000; // Reduzido para 5kHz para melhor torque no L298N
-const int CANAL_PWM_DIREITA = 0; // Canais ajustados
+const int FREQ_PWM = 5000;
+const int CANAL_PWM_DIREITA = 0;
 const int CANAL_PWM_ESQUERDA = 1;
 const int RESOLUCAO_PWM = 8;
 
@@ -76,10 +70,6 @@ const Nota musicaVitoria[] = {
 };
 const int TOTAL_NOTAS = sizeof(musicaVitoria) / sizeof(musicaVitoria[0]);
 
-// ===================================================================================
-// --- IMPLEMENTAÇÃO ---
-// ===================================================================================
-
 void pararMotores() {
     digitalWrite(M_DIREITA_FRENTE, LOW);
     digitalWrite(M_DIREITA_TRAS, LOW);
@@ -89,20 +79,36 @@ void pararMotores() {
     ledcWrite(CANAL_PWM_ESQUERDA, 0);
 }
 
-void moverFrente(int velEsq, int velDir) {
-    // CORREÇÃO DE DIREÇÃO: Lógica Invertida (LOW/HIGH) para corrigir rotação oposta
+void moverFrente() {
+    // lógica Invertida (LOW/HIGH) para corrigir rotação oposta
     digitalWrite(M_ESQUERDA_FRENTE, LOW);
     digitalWrite(M_ESQUERDA_TRAS, HIGH);
     
     digitalWrite(M_DIREITA_FRENTE, LOW);
     digitalWrite(M_DIREITA_TRAS, HIGH);
 
-    ledcWrite(CANAL_PWM_ESQUERDA, velEsq);
-    ledcWrite(CANAL_PWM_DIREITA, velDir);
+    ledcWrite(CANAL_PWM_ESQUERDA, 255);
+    ledcWrite(CANAL_PWM_DIREITA, 255);
+}
+
+void passoAzul() {
+
+    digitalWrite(M_DIREITA_FRENTE, LOW);
+    digitalWrite(M_DIREITA_TRAS, HIGH);
+    ledcWrite(CANAL_PWM_ESQUERDA, 255);
+
+}
+
+void passoVermelho() {
+
+    digitalWrite(M_ESQUERDA_FRENTE, LOW);
+    digitalWrite(M_ESQUERDA_TRAS, HIGH);
+    ledcWrite(CANAL_PWM_DIREITA, 255);
+
 }
 
 void moverTras() {
-    // CORREÇÃO DE DIREÇÃO: Lógica Invertida para mover para trás
+    // logica invertida para mover para trás
     digitalWrite(M_ESQUERDA_FRENTE, HIGH);
     digitalWrite(M_ESQUERDA_TRAS, LOW);
     
@@ -113,9 +119,8 @@ void moverTras() {
     ledcWrite(CANAL_PWM_DIREITA, 255);
 }
 
+// funcao que toca a musica
 void tocarMusicaBloqueante() {
-    // Nota: Em sistemas críticos, usaríamos millis() e interrupções.
-    // Mantido simples aqui, mas ciente que bloqueia o MQTT momentaneamente.
     for (int i = 0; i < TOTAL_NOTAS; i++) {
         tone(PINO_BUZZER, musicaVitoria[i].frequencia, musicaVitoria[i].duracao);
         delay(musicaVitoria[i].duracao + musicaVitoria[i].pausa);
@@ -123,12 +128,8 @@ void tocarMusicaBloqueante() {
     }
 }
 
-// Filtro para evitar leituras falsas (Ghost Sensing)
-int contadorValidacaoSensor = 0;
-const int LEITURAS_PARA_VALIDAR = 3; 
-
 void verificarSensor() {
-    if (estadoAtual != CORRIDA) return;
+    if (vencedor) return;
 
     VL53L0X_RangingMeasurementData_t measure;
     lox.rangingTest(&measure, false);
@@ -141,25 +142,28 @@ void verificarSensor() {
 
         bool detectou = false;
         
-        // Lógica Azul
+        // logica azul
         if (distancia > 30 && distancia < 60) {
             vencedorNome = "azul";
             detectou = true;
         }
-        // Lógica Vermelho
+        // logica vermelho
         else if (distancia > 70 && distancia < 150) {
-            vencedorNome = "vermelho"; // Assumi vermelho baseado no código anterior
+            vencedorNome = "vermelho";
             detectou = true;
         }
 
+        // envia o jogador que venceu
         if (detectou) {
-            contadorValidacaoSensor++;
-            if (contadorValidacaoSensor >= LEITURAS_PARA_VALIDAR) {
-                estadoAtual = VITORIA_DETECTADA;
-                Serial.println("Vencedor Confirmado: " + vencedorNome);
-            }
-        } else {
-            contadorValidacaoSensor = 0;
+
+            JsonDocument doc;
+            String sms;
+
+            doc["vencedor"] = vencedorNome;
+            serializeJson(doc, sms);
+            client.publish(mqtt_topic_pub, sms.c_str());
+
+            vencedor = true;
         }
     }
 }
@@ -174,44 +178,47 @@ void callbackMqtt(char *topic, byte *payload, unsigned int length) {
     DeserializationError erro = deserializeJson(doc, msg);
     if (erro) return;
 
-    // 1. Controle de Jogo (Start/Stop)
-    // FIX: containsKey deprecated in ArduinoJson v7. Substituido por !doc["key"].isNull()
+    // inicio e fim de jogo
     if (!doc["fim"].isNull()) {
         const char *fim = doc["fim"];
         if (strcmp(fim, "0") == 0) {
-            // INICIAR JOGO
+            // inicia o jogo
             Serial.println("COMANDO: INICIAR JOGO");
             pontosAzul = 0;
             velocidadeAzul = 0;
             pontosVermelho = 0;
             velocidadeVermelho = 0;
-            estadoAtual = CORRIDA;
-            contadorValidacaoSensor = 0;
+            iniciar = true;
+            vencedor = false;
         } 
         else if (strcmp(fim, "1") == 0) {
-            // PARAR JOGO
+            // termina o jogo
             Serial.println("COMANDO: PARAR JOGO");
-            estadoAtual = AGUARDANDO;
+            iniciar = false;
+            vencedor = true;
             pararMotores();
+            moverTras();
+
+            tempoVoltar = millis();
         }
     }
 
-    // 2. Atualização de Pontos (apenas se estiver em jogo ou aguardando)
-    // FIX: containsKey deprecated. Substituido por checagem de nulidade.
+    // mexendo os motores quando o jogador pontua
     if (!doc["esp"].isNull() && !doc["pontos"].isNull()) {
+
         const char *esp = doc["esp"];
         
         if (strcmp(esp, "esp1") == 0) { // AZUL
-            pontosAzul++;
-            if(pontosAzul > 10) pontosAzul = 10;
-            velocidadeAzul = map(pontosAzul, 0, 10, 60, 255); // Minimo 60 para vencer inércia
-            Serial.printf("Azul Vel: %d\n", velocidadeAzul);
+            Serial.println("azul andando");
+            andarAzul = true;
+            tempoAzul = millis();
+            passoAzul();
         }
         else if (strcmp(esp, "esp2") == 0) { // VERMELHO (?)
-            pontosVermelho++;
-            if(pontosVermelho > 10) pontosVermelho = 10;
-            velocidadeVermelho = map(pontosVermelho, 0, 10, 60, 255);
-            Serial.printf("Vermelho Vel: %d\n", velocidadeVermelho);
+            Serial.println("vermelho andando");
+            andarVermelho = true;
+            tempoVermelho = millis();
+            passoVermelho();
         }
     }
 }
@@ -219,7 +226,6 @@ void callbackMqtt(char *topic, byte *payload, unsigned int length) {
 void reconectarMqtt() {
     if (!client.connected()) {
         Serial.print("Conectando MQTT...");
-        // Usa ID único + Random para evitar desconexão por conflito de ID
         String clientId = mqtt_client_id + String(random(0xffff), HEX);
         if (client.connect(clientId.c_str())) {
             Serial.println("Conectado!");
@@ -273,47 +279,33 @@ void loop() {
     if (!client.connected()) reconectarMqtt();
     client.loop();
 
-    // 2. Máquina de Estados
-    switch (estadoAtual) {
-        case AGUARDANDO:
+    // sempre verifica o sensor durante o loop
+    verificarSensor();
+
+    // para o motor durante o jogo, para o passo
+    if (iniciar) {
+
+        if (andarAzul && millis() - tempoAzul >= 100) {
             pararMotores();
-            // Apenas espera comando MQTT
-            break;
+            andarAzul = false;
+        }
 
-        case CORRIDA:
-            // Atualiza velocidade baseada nos pontos recebidos
-            // ATENÇÃO: Se velocidade for 0, motores parados.
-            // Se inverteu a fiação (Frente/Tras), troque a função aqui.
-            moverFrente(velocidadeAzul, velocidadeVermelho); 
-            
-            verificarSensor();
-            break;
-
-        case VITORIA_DETECTADA:
-            // Envia MQTT
-            {
-                JsonDocument doc;
-                String msg;
-                doc["vencedor"] = vencedorNome;
-                serializeJson(doc, msg);
-                client.publish(mqtt_topic_pub, msg.c_str());
-            }
-            
-            estadoAtual = RETORNO;
-            break;
-
-        case RETORNO:
-            // Recua o carrinho
-            moverTras();
-            tocarMusicaBloqueante(); // Toca a música (bloqueante)
-            
-            // Após música, reseta
+        if (andarVermelho && millis() - tempoVermelho >= 100) {
             pararMotores();
-            estadoAtual = AGUARDANDO;
-            
-            // Opcional: Resetar pontos
-            pontosAzul = 0; pontosVermelho = 0;
-            velocidadeAzul = 0; velocidadeVermelho = 0;
-            break;
+            andarVermelho = false;
+        }
+
+    }
+
+    // volta os motores para o estado inicial
+    if (vencedor && millis() - tempoVoltar >= 500) {
+        pararMotores();
+    }
+
+    // termina o jogo
+    else if (vencedor && millis() - tempoVoltar >= 1000) {
+        tocarMusicaBloqueante();
+        iniciar = false;
+        vencedor = false;
     }
 }

@@ -7,10 +7,12 @@
 #include <LiquidCrystal_I2C.h>
 #include "internet.h"
 
+// pinos do hardware
 #define pinApagar 13
 #define pinEnviar 34
 #define pinLed 23
 
+// nome do esp
 const String numEsp = "1";
 
 const unsigned long tempoEsperaConexao = 10000;
@@ -22,7 +24,6 @@ const char *mqtt_client_id = "senai134_esp1_sub_match_game";
 const char *mqtt_topic_sub = "main_match_game_pub";
 const char *mqtt_topic_pub = "main_match_game_sub";
 
-const int botaoAz = 19;
 int estadoBotaoAnterior = HIGH;
 
 WiFiClient espClient;
@@ -62,6 +63,8 @@ bool iniciarAnterior = false;
 
 // variavel para guardar a resposta durante o código
 String resposta;
+bool respEnviada = false;
+unsigned long tempoRespostaEnviada = 0;
 
 void setup() {
 
@@ -96,28 +99,40 @@ void loop() {
 
   char key = keypad.getKey();
 
+  // apaga o lcd para poder digitar
   if (iniciar && !iniciarAnterior) {
       if (millis() - tempoIniciar > 1000) { 
         lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("resposta: ");
         iniciarAnterior = true;
       }
   }
 
   if (isdigit(key) && iniciar) {
     resposta.concat(key);
-    lcd.setCursor(0, 0);
+    lcd.setCursor(10, 0);
     lcd.print(resposta.c_str());
   }
 
   if (botaoEnviar.fell() && !iniciar) {
     pronto();
-    Serial.print("iniciar");
   }
 
   if (botaoEnviar.fell() && iniciar) {
     enviarResposta();
     resposta = "";
     lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("resposta enviada");
+    respEnviada = true;
+    tempoRespostaEnviada = millis();
+  }
+
+  if (respEnviada && millis() - tempoRespostaEnviada >= 500) {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("resposta: ");
   }
 
   if (botaoApagar.fell() && iniciar) {
@@ -169,6 +184,7 @@ void retornoMqtt(char *topic, byte *payload, unsigned int length)
 
   if (fim != NULL) {
 
+    // comeco do jogo
     if (strcmp(fim, "0") == 0) {
       iniciar = true;
       iniciarAnterior = false;
@@ -177,6 +193,7 @@ void retornoMqtt(char *topic, byte *payload, unsigned int length)
       lcd.setCursor(0, 0);
       lcd.print("VAMOS NESSA!");
     }
+    // fim do jogo
     if (strcmp(fim, "1") == 0) {
       iniciar = false;
       conectado();
