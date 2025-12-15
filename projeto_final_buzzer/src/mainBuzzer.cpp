@@ -15,8 +15,8 @@
 // Pinos de Direção (IN1/IN2/IN3/IN4)
 #define M_DIREITA_FRENTE 18
 #define M_DIREITA_TRAS 19
-#define M_ESQUERDA_TRAS 33
-#define M_ESQUERDA_FRENTE 32 
+#define M_ESQUERDA_TRAS 32
+#define M_ESQUERDA_FRENTE 33 
 
 #define LED_R 13
 #define LED_B 5
@@ -33,19 +33,21 @@ Adafruit_VL53L0X lox = Adafruit_VL53L0X();
 
 String vencedorNome = "";
 bool iniciar = false;
-bool vencedor = true;
+bool vencedor = false;
 bool andarAzul = false;
 bool andarVermelho = false;
+bool modoRetorno = false;
 unsigned long tempoAzul = 0;
 unsigned long tempoVermelho = 0;
 unsigned long tempoVoltar = 0;
+unsigned long tempoInicioRetorno = 0;
 
 int pontosAzul = 0;
 int velocidadeAzul = 0;
 int pontosVermelho = 0;
 int velocidadeVermelho = 0;
 
-const int FREQ_PWM = 5000;
+const int FREQ_PWM = 1000;
 const int CANAL_PWM_DIREITA = 0;
 const int CANAL_PWM_ESQUERDA = 1;
 const int RESOLUCAO_PWM = 8;
@@ -91,7 +93,7 @@ void moverFrente() {
     ledcWrite(CANAL_PWM_DIREITA, 255);
 }
 
-void passoAzul() {
+void passoVermelho() {
 
     digitalWrite(M_DIREITA_FRENTE, LOW);
     digitalWrite(M_DIREITA_TRAS, HIGH);
@@ -99,7 +101,7 @@ void passoAzul() {
 
 }
 
-void passoVermelho() {
+void passoAzul() {
 
     digitalWrite(M_ESQUERDA_FRENTE, LOW);
     digitalWrite(M_ESQUERDA_TRAS, HIGH);
@@ -129,7 +131,7 @@ void tocarMusicaBloqueante() {
 }
 
 void verificarSensor() {
-    if (vencedor) return;
+    if (!iniciar || modoRetorno) return;
 
     VL53L0X_RangingMeasurementData_t measure;
     lox.rangingTest(&measure, false);
@@ -138,7 +140,7 @@ void verificarSensor() {
         int distancia = measure.RangeMilliMeter;
         
         // Debug
-        // Serial.printf("Dist: %d mm\n", distancia);
+        Serial.printf("Dist: %d mm\n", distancia);
 
         bool detectou = false;
         
@@ -156,6 +158,8 @@ void verificarSensor() {
         // envia o jogador que venceu
         if (detectou) {
 
+            iniciar = false;
+
             JsonDocument doc;
             String sms;
 
@@ -163,7 +167,7 @@ void verificarSensor() {
             serializeJson(doc, sms);
             client.publish(mqtt_topic_pub, sms.c_str());
 
-            vencedor = true;
+            detectou = false;
         }
     }
 }
@@ -190,6 +194,7 @@ void callbackMqtt(char *topic, byte *payload, unsigned int length) {
             velocidadeVermelho = 0;
             iniciar = true;
             vencedor = false;
+            modoRetorno = false;
         } 
         else if (strcmp(fim, "1") == 0) {
             // termina o jogo
@@ -198,13 +203,14 @@ void callbackMqtt(char *topic, byte *payload, unsigned int length) {
             vencedor = true;
             pararMotores();
             moverTras();
-
+            modoRetorno = true;
+            tempoInicioRetorno = millis();
             tempoVoltar = millis();
         }
     }
 
     // mexendo os motores quando o jogador pontua
-    if (!doc["esp"].isNull() && !doc["pontos"].isNull()) {
+    if ((!doc["esp"].isNull() && !doc["pontos"].isNull()) && (iniciar && !modoRetorno)) {
 
         const char *esp = doc["esp"];
         
@@ -250,14 +256,14 @@ void setup() {
     pinMode(M_ESQUERDA_FRENTE, OUTPUT);
     pinMode(M_ESQUERDA_TRAS, OUTPUT);
 
-    // Garantir estado inicial desligado
-    pararMotores();
-
     // Configuração PWM (ESP32 API v2.x)
     ledcSetup(CANAL_PWM_DIREITA, FREQ_PWM, RESOLUCAO_PWM);
     ledcSetup(CANAL_PWM_ESQUERDA, FREQ_PWM, RESOLUCAO_PWM);
     ledcAttachPin(PIN_PWM_DIREITA, CANAL_PWM_DIREITA);
     ledcAttachPin(PIN_PWM_ESQUERDA, CANAL_PWM_ESQUERDA);
+
+    // Garantir estado inicial desligado
+    pararMotores();
 
     // Inicialização Conexões
     conectaWiFi(); // Função do seu internet.h
@@ -283,7 +289,7 @@ void loop() {
     verificarSensor();
 
     // para o motor durante o jogo, para o passo
-    if (iniciar) {
+    if (iniciar && !modoRetorno) {
 
         if (andarAzul && millis() - tempoAzul >= 100) {
             pararMotores();
@@ -297,15 +303,21 @@ void loop() {
 
     }
 
-    // volta os motores para o estado inicial
-    if (vencedor && millis() - tempoVoltar >= 500) {
-        pararMotores();
-    }
+    // fim de jogo
+    if (modoRetorno) {
+        unsigned long delta = millis() - tempoInicioRetorno;
 
-    // termina o jogo
-    else if (vencedor && millis() - tempoVoltar >= 1000) {
-        tocarMusicaBloqueante();
-        iniciar = false;
-        vencedor = false;
+        if (delta < 2000);
+        
+        else if (delta >= 2000 && delta < 2100) {
+            pararMotores();
+        }
+        
+        else if (delta >= 2100) {
+            tocarMusicaBloqueante();
+            modoRetorno = false;
+            pararMotores();
+            Serial.println("Estado: AGUARDANDO NOVO JOGO");
+        }
     }
 }

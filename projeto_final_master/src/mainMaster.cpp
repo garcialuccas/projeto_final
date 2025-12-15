@@ -286,10 +286,8 @@ void retornoMqtt(char *topic, byte *payload, unsigned int length) {
   }
 
   if (venc != NULL) {
-
-    if (strcasecmp(venc, "") != 0) {
-      vencedorRecebido = String(venc);
-    }
+    vencedorRecebido = String(venc);
+    venc = NULL;
   }
 }
 
@@ -328,8 +326,7 @@ void mostrarVencedor() {
   lcd.clear();
   lcd.setCursor(0, 0);
 
-  lcd.print(vencedorRecebido);
-  lcd.print(" VENCEU!");
+  lcd.print("VOCÊ VENCEU!");
   lcd.setCursor(0, 1);
   lcd.print("PARABENS!");
   

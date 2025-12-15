@@ -9,7 +9,7 @@
 
 // pinos do hardware
 #define pinApagar 13
-#define pinEnviar 34
+#define pinEnviar 19
 #define pinLed 23
 
 // nome do esp
@@ -133,6 +133,7 @@ void loop() {
     lcd.clear();
     lcd.setCursor(0, 0);
     lcd.print("resposta: ");
+    respEnviada = false;
   }
 
   if (botaoApagar.fell() && iniciar) {
